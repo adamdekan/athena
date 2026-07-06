@@ -9,7 +9,7 @@ The TTS path is built around **SSE token streaming with incremental SNAC decodin
 
 ## Quick start
 
-Models are **not** bundled — the repo ships source, scripts, and the ATHENA patches; `install.sh` fetches everything else. Assuming the GPU stack is already installed (NVIDIA **595.x** driver, CUDA **12.9**, cuDNN **9.x** — see [Install the NVIDIA driver + CUDA 12.9](#install-the-nvidia-driver--cuda-129-debian-13)):
+Models are **not** bundled — the repo ships source, scripts, and the ATHENA patches; `install.sh` fetches everything else. Assuming the GPU stack is already installed (NVIDIA **595.x** driver, CUDA **12.9**, cuDNN **9.x** — see [Install the NVIDIA driver + CUDA 12.9](#install-the-nvidia-driver--cuda-129-ubuntu-2404)):
 
 ```bash
 git clone <this-repo-url> athena && cd athena   # clone ANYWHERE — paths auto-derive
@@ -253,7 +253,7 @@ Consolidation runs **only on a graceful "Goodbye Athena"** exit — Ctrl+C does 
 
 ## Prerequisites
 
-- Debian 13 (trixie) or similar; **kernel with the CVE-2026-43303 fix** (see [Stability](#stability-diagnostics--crash-capture) — this is load-bearing, not optional)
+- **Ubuntu 24.04.4 LTS** (the tested platform; kernel `6.17.0-1028-oem`)
 - CMake ≥ 3.18, C++17 compiler
 - libcurl development headers
 - SDL2 development headers (microphone capture)
@@ -274,11 +274,11 @@ This stack is **pinned and reproducible** — the versions below were built and 
 | Component | Pinned version |
 |-----------|----------------|
 | GPU architecture | NVIDIA Blackwell, `sm_120a` (`-DCMAKE_CUDA_ARCHITECTURES="120a;86"`) |
-| Kernel | Debian `6.12.94+deb13` (trixie-security) or ≥ `7.0.13` — **must carry the CVE-2026-43303 fix** (7.0.12 is affected; see Stability) |
+| OS | **Ubuntu 24.04.4 LTS** (kernel `6.17.0-1028-oem`) |
 | NVIDIA driver | **595.71.05** (open kernel modules, DKMS, from the NVIDIA CUDA apt repo) |
-| CUDA toolkit | **12.9** (nvcc V12.9.86 = `cuda-toolkit-12-9` 12.9.1) |
+| CUDA toolkit | **12.9** (nvcc V12.9.86 = `cuda-toolkit-12-9` 12.9.2) |
 | cuDNN | **9.23.2.1-1** (`cudnn9-cuda-12`, FULL variant) |
-| Host compiler | GCC **14.2.0** (Debian 14.2.0-19) |
+| Host compiler | GCC **13.3.0** (Ubuntu 13.3.0-6ubuntu2~24.04.1) |
 | llama.cpp | release **b9253** |
 | whisper.cpp | commit `afa2ea544fb4b0448916b4a31ecd33c8685bd482` |
 | ONNX Runtime | **1.27.0** (`linux-x64-gpu_cuda12`) |
@@ -294,39 +294,34 @@ Build cuda_12.9.r12.9/compiler.36037853_0
 ```
 
 
-## Install the NVIDIA driver + CUDA 12.9 (Debian 13)
+## Install the NVIDIA driver + CUDA 12.9 (Ubuntu 24.04)
 
-The driver and toolkit come from NVIDIA's CUDA apt repos, installed as debs with **DKMS** (so kernel updates rebuild the module automatically). One quirk, verified 2026-07: the **debian13** repo carries the drivers but only CUDA **13.x** toolkits — CUDA **12.9** and the network cuDNN packages live in the **debian12** repo, which installs cleanly on trixie and is signed by the same key. Add both:
+The driver and toolkit come from NVIDIA's CUDA apt repo for Ubuntu 24.04, installed as debs with **DKMS** (so kernel updates rebuild the module automatically). The `ubuntu2404` repo carries the driver, the CUDA **12.9** toolkit, and cuDNN all in one place — no second repo needed:
 
 ```bash
-# 1) NVIDIA repo key + debian13 repo (drivers)
-wget https://developer.download.nvidia.com/compute/cuda/repos/debian13/x86_64/cuda-keyring_1.1-1_all.deb
+# 1) NVIDIA CUDA repo for Ubuntu 24.04 (driver + CUDA 12.9 toolkit + cuDNN)
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
-
-# 2) debian12 repo (CUDA 12.9 toolkit + cuDNN network packages, same signing key)
-echo 'deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/ /' \
-  | sudo tee /etc/apt/sources.list.d/cuda-debian12-x86_64.list
 sudo apt update
 
-# 3) Open-kernel-module driver, PINNED to the tested 595 branch
-sudo apt install -y nvidia-driver-pinning-595    # apt pin: keeps the stack on 595.x
-sudo apt install -y nvidia-open                  # resolves to 595.71.05 under the pin (DKMS build)
+# 2) Open-kernel-module driver, 595 branch (the versioned package pins the branch)
+sudo apt install -y nvidia-driver-595-open       # → 595.71.05-0ubuntu0.24.04.1 (DKMS build)
 
-# 4) CUDA 12.9 toolkit (nvcc V12.9.86)
-sudo apt install -y cuda-toolkit-12-9=12.9.1-1   # omit the =pin to take the newest 12.9.x
+# 3) CUDA 12.9 toolkit (nvcc V12.9.86)
+sudo apt install -y cuda-toolkit-12-9            # → 12.9.2
 echo 'export PATH=/usr/local/cuda-12.9/bin:$PATH' >> ~/.bashrc
 ```
 
 Reboot after the driver install, then verify: `nvidia-smi --query-gpu=driver_version --format=csv,noheader` → `595.71.05`, and `nvcc --version` → `V12.9.86`.
 
-> The pinning package is what keeps `apt upgrade` from jumping to the 610 feature branch. Newer 595.x point releases (e.g. 595.84, which ships newer GSP firmware) install in place with `sudo apt install nvidia-open` once the repo publishes them — see `STABILITY-RUNBOOK.md` Phase B.
+> The versioned `nvidia-driver-595-open` package keeps `apt upgrade` on the tested 595 branch (it won't jump to the 610 feature branch). Newer 595.x point releases install in place with `sudo apt install nvidia-driver-595-open` once the repo publishes them.
 
 
 ## Install cuDNN 9
 
 ONNX Runtime GPU requires cuDNN 9.x. The CUDA toolkit does **not** include cuDNN. Use the **FULL** variant, not JIT — JIT ships only runtime-fusion engines and compiles kernels at first use (warm-up latency), which matters on a brand-new arch like `sm_120a`.
 
-**Network repo (simplest — uses the debian12 repo added above):**
+**Network repo (simplest — uses the ubuntu2404 repo added above):**
 
 ```bash
 sudo apt install -y cudnn9-cuda-12         # latest = 9.23.2.1-1 (the tested pin)
@@ -335,9 +330,9 @@ sudo apt install -y cudnn9-cuda-12         # latest = 9.23.2.1-1 (the tested pin
 **Local repo deb (offline-friendly alternative; direct URL, no login needed):**
 
 ```bash
-wget https://developer.download.nvidia.com/compute/cudnn/9.23.2/local_installers/cudnn-local-repo-debian12-9.23.2_1.0-1_amd64.deb
-sudo dpkg -i cudnn-local-repo-debian12-9.23.2_1.0-1_amd64.deb
-sudo cp /var/cudnn-local-repo-debian12-9.23.2/cudnn-*-keyring.gpg /usr/share/keyrings/
+wget https://developer.download.nvidia.com/compute/cudnn/9.23.2/local_installers/cudnn-local-repo-ubuntu2404-9.23.2_1.0-1_amd64.deb
+sudo dpkg -i cudnn-local-repo-ubuntu2404-9.23.2_1.0-1_amd64.deb
+sudo cp /var/cudnn-local-repo-ubuntu2404-9.23.2/cudnn-*-keyring.gpg /usr/share/keyrings/
 sudo apt update && sudo apt install -y cudnn9-cuda-12
 ```
 
@@ -635,16 +630,15 @@ talk-llama feeds the model a **raw transcript** with `Igor:` / `Athena:` headers
 
 ## Stability, diagnostics & crash capture
 
-This section is load-bearing. The stack was hardened through an extended forensic campaign (six kernel-level crashes root-caused — full evidence in `CHANGES.MD` §10–§16 and the panic dumps under `athena-diag/`); the result is a set of one-time installs plus always-on runtime defenses.
+The diagnostic and hardening tooling below came out of an extended forensic campaign on the reference machine (kernel-level crashes root-caused across `CHANGES.MD` §10–§22). That campaign **acquitted ATHENA and every one of its components** (§22): the corruption reproduced under bare `llama-cli` / `llama-server` GPU load with no ATHENA code in the loop, across multiple drivers and kernels — the remaining suspect is that one machine's power delivery. So the tooling here is **optional** — useful if you ever hit kernel instability, not required to run ATHENA. On the tested **Ubuntu 24.04.4 LTS** config the stack runs stably without any of it.
 
-### The kernel requirement (do not skip)
+### Kernel memory corruption (only if you hit it)
 
-Sustained CUDA/UVM activity on kernels affected by **CVE-2026-43303** ("mm/page_alloc: clear page->private in free_pages_prepare") triggers in-place corruption of live kernel page metadata — manifesting as random `Bad page state` warnings, `pagealloc: memory corruption`, GPFs in `lruvec_stat_mod_folio`, sporadic **Xid 69** GPU errors (a co-symptom — the GPU consuming the same corrupted host memory), and eventually kernel panics. Run a fixed kernel:
+Symptoms — random `Bad page state`, `pagealloc: memory corruption`, GPFs in `lruvec_stat_mod_folio`, sporadic **Xid 69** (a co-symptom, the GPU consuming corrupted host memory), and eventual kernel panics — point at a Linux kernel bug (**CVE-2026-43303**, "mm/page_alloc: clear page->private in free_pages_prepare") exercised by sustained CUDA/UVM activity, or a marginal platform. If you see them:
 
-- Debian 13: **`6.12.94+deb13` (trixie-security) or `7.0.13+`** (`7.0.12` is affected).
-- `./check-kernel-fix.sh` reports whether a fixed kernel is installable on your system.
-- Until you're on a fixed kernel, boot with `page_poison=1 nohugevmalloc` as containment tripwires (they reduce and expose the corruption; they do not fully prevent it). Remove them once two clean full-length sessions confirm the fixed kernel.
-- `STABILITY-RUNBOOK.md` walks the whole procedure step by step (DKMS module build for the target kernel included).
+- Run a kernel that carries the CVE-2026-43303 fix; `./check-kernel-fix.sh` reports whether one is installable on your system.
+- Meanwhile boot with `page_poison=1 nohugevmalloc` as containment tripwires (they reduce and expose the corruption; they don't fully prevent it).
+- `STABILITY-RUNBOOK.md` walks a full kernel-swap procedure — written for the reference machine's original OS and kept for reference; the tested Ubuntu 24.04.4 config needs none of it.
 
 ### One-time hardening installs
 
@@ -799,7 +793,7 @@ Decode is bound by **system memory bandwidth** (~3.07 GB of routed-expert reads 
 | Slow to respond | Lower `--vad-window-ms` (500) and `--vad-last-ms` (300) |
 | CUDA EP unavailable | Install cuDNN 9 **full**, add the ORT lib path to `ld.so.conf.d`, `sudo ldconfig` |
 | SNAC decoder init failed | Delete the `.optimized` cache; orpheus-speak retries on CPU automatically and prints the real ORT error |
-| MPS didn't engage (3 clients time-slicing) | `mps-log/` empty in the run dir is the tell; the launcher liveness-probes and self-checks (Debian needs `/usr/sbin` on PATH for the MPS server — handled) |
+| MPS didn't engage (3 clients time-slicing) | `mps-log/` empty in the run dir is the tell; the launcher liveness-probes and self-checks (some distros omit `/usr/sbin` from the user PATH for the MPS server — the launcher prepends it) |
 | `Bad page state` / `pagealloc: memory corruption` / Xid 69 / kernel panics | **Kernel bug, not Athena** — run a CVE-2026-43303-fixed kernel; see [Stability](#stability-diagnostics--crash-capture) and `STABILITY-RUNBOOK.md`; panic backtraces auto-harvest to `athena-diag/crash-<ts>/` |
 | OOM | Reduce `--ctx-size`, drop Orpheus to Q4_K_M, recheck the VRAM budget |
 | speak-daemon.sh hangs (legacy path) | Check orpheus-speak is running and the three file paths match the launcher's |

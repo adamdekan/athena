@@ -3,6 +3,8 @@
 Summary of all code/config changes made this session, with current on-disk state.
 **No system state (GPU compute mode, CPU governor, MPS) was left modified — a reboot is clean.**
 
+> **Platform note.** §1–§22 ran on the reference machine's original **Debian 13 (trixie)** environment — where the kernel-corruption crash-forensics saga unfolded. **§23 onward is the current Ubuntu 24.04.4 LTS redeploy, the tested and shipped platform.** The user-facing docs (README, CLAUDE.md) describe Ubuntu 24.04.4; this changelog and `STABILITY-RUNBOOK.md` deliberately keep the Debian history intact as the forensic record.
+
 ---
 
 ## 1. Documentation

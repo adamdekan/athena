@@ -6,6 +6,8 @@ NVIDIA driver/UVM kernel paths; Xid 69 is a co-symptom). The fix is a patched ke
 **6.12.94+deb13 (trixie-security) is already in `/boot`** and carries it. Full evidence:
 `CHANGES.MD` §15–§16, panic dumps in `athena-diag/pstore-archive/`.
 
+> **Historical / reference-machine doc.** This procedure targets the reference machine's original **Debian 13 (trixie)** kernel and predates the **Ubuntu 24.04.4 LTS** redeploy (`CHANGES.MD` §23) — the tested/shipped platform. It was later superseded: §22 acquitted ATHENA and root-caused the corruption to that machine's hardware/platform (the fault reproduced under bare GPU load and even on a CVE-fixed kernel, §19). Kept as the forensic record; **not needed to run ATHENA on Ubuntu 24.04.4.**
+
 **Environment facts this runbook relies on (verified 2026-07-02):**
 - Driver = NVIDIA CUDA apt repo Debian packaging, `nvidia-open` **595.71.05-1**, DKMS-managed
   (`/usr/sbin/dkms`; modules in `/lib/modules/<kernel>/updates/dkms/`).
