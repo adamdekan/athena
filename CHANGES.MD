@@ -1278,3 +1278,150 @@ end-to-end (proven: the capture path stays one arg; the desktop path stays one t
 **Not portable-after-build:** the ONNX Runtime RUNPATH and the CUDA `sm_120a` binaries are
 baked at build time, so *clone → build → run* works anywhere, but *moving the tree after
 building* requires a rebuild (README-documented).
+
+## 26. Device retarget — desktop RTX 5080 (16 GB) + Bose Bluetooth, Qwen3.6-35B (2026-07-06)
+
+Retargeted from the 397B reference laptop (192 GB RAM / RTX PRO 5000 / CUDA 12.9) to a
+desktop: **i7-14700KF, 62 GB RAM, single RTX 5080 (16 GB VRAM, Blackwell sm_120), driver
+610.43.02, CUDA 13.3**. The 397B (161 GB pinned host RAM) does not fit here.
+
+**Conversational model → Qwen3.6-35B-A3B (UD-Q4_K_XL, single-file GGUF).** Settings taken
+from `~/qwen_t8.sh` (the device-optimized inference for this box), translated into
+talk-llama's in-process flags: `--ctx-size 32768` (was 80000), `-t 8` on the P-cores
+(`taskset -c 0-15`, was `-t 16`), `--cpu-moe` kept. `QWEN_MODEL` now defaults to
+`$HOME/.models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf`, `QWEN_SHARDS=1` (single file; preflight
+loop generalized). **KV cache is bf16, NOT qwen_t8's q4_0**: qwen_t8's q4_0 existed to fit
+131072 ctx standalone; at 32k with ~11 GB VRAM free there is no reason to quantize KV, and
+bf16 avoids the Qwen quality degradation this repo has repeatedly seen with quantized KV.
+**Measured (headless load, SDL dummy, steady state): peak 5636 MiB VRAM** — CUDA0 weights
+2079 MiB + bf16 KV(32k) + compute; experts 19705 MiB in host RAM; whisper small.en 487 MiB.
+bf16 KV costs only ~540 MiB over q4_0 because 35B-A3B is a hybrid GatedDeltaNet arch — only
+every 4th layer keeps a full KV cache (the rest are "filtered" linear-attention layers).
+
+**Builds (CUDA 13.3 host-compiler gate).** CUDA 13.3 rejects host gcc > 15; system gcc is
+16, so both builds use **gcc-14/g++-14** (matches the working system `llama-server` b9355,
+built with GNU 14.3.1). `CMAKE_CUDA_ARCHITECTURES=120`. whisper.cpp pulled to current master
+(`6fc7c33`) so its bundled llama supports Qwen3.6-35B-A3B; the patched CMakeLists built
+clean on it. ONNX Runtime 1.27 (cuda12 tarball) extracted in place.
+
+**llama.cpp build SKIPPED.** `llama-server` serves only the Orpheus TTS backend; the system
+binary (b9355) already runs on this GPU, so `LLAMA_SERVER` now defaults to
+`$(command -v llama-server)`. One fewer Blackwell CUDA build.
+
+**SNAC → CPU (`--snac-cpu`).** Saves ~1.7 GB VRAM on the tight card and sidesteps the
+cuda12-ORT-vs-CUDA-13.3 runtime mismatch. Measured warmup 26 ms — realtime-capable. (The
+cuda12 CUDA EP would need libcublas.so.12, absent here.) emotion2vec left disabled (model
+not fetched; auto-disables when the file is absent).
+
+**Audio → Bose Revolve SoundLink over Bluetooth (PipeWire).** `HEADSET_PATTERN=bluez`
+(matches `bluez_output.<MAC>.*` + `bluez_input.<MAC>`). TTS streaming player switched from
+`aplay` (raw ALSA, could not reach the PipeWire BT sink — and was a no-op anyway: the
+streaming path uses `--play-raw`, not `--play`) to **`pacat`** (libpulse, honors the
+`PULSE_SINK` that `setup_audio` exports). Mic capture forced onto the pulse backend
+(`SDL_AUDIODRIVER=pulseaudio`) so SDL honors `PULSE_SOURCE`. **Barge-in removed**
+(half-duplex): a single BT speaker+mic cannot do A2DP output + HFP mic at once. NOTE:
+talk-llama holds the mic open continuously, so the Bose runs in **HFP/mSBC duplex
+(16 kHz mono both ways)** — phone-call quality, not A2DP.
+
+**Verified:** all three binaries build + link (ORT/SDL2 resolve); all model files present;
+headless 35B load fits VRAM with no OOM and reaches whisper/audio init; orpheus-speak SNAC
+CPU init reaches its watch loop. Not yet exercised live: the full spoken loop over the Bose
+(profile switching / echo behavior is a first-launch runtime check).
+
+### 26.1 Spending the VRAM headroom — whisper large-v3-turbo + partial expert offload (2026-07-06)
+
+The bf16-KV pipeline used ~8.6 GB of 16.3 GB (talk-llama 5.6 + Orpheus ~3), leaving headroom.
+Spent it on the two things a voice assistant actually feels — STT accuracy and time-to-first-
+audio — after measuring, not guessing.
+
+**STT: small.en → large-v3-turbo** (1.6 GB, +~1.2 GB VRAM). Drop-in `-mw` swap. turbo is
+multilingual, so the invocation now pins `-l en`. `WHISPER_MODEL` overridable.
+
+**Partial MoE expert offload — implemented the stubbed `--n-cpu-moe`.** The ATHENA patch
+parsed `--n-cpu-moe` but bailed with "not yet supported via tensor overrides" (talk-llama.cpp).
+Wired it up: build an anchored regex `blk\.(0|1|…|N-1)\.ffn_(up|down|gate)_(ch|)exps` → CPU
+buffer, so the first N layers' experts stay in RAM and the remaining (40-N) run on the GPU.
+Synced to `patches/talk-llama/talk-llama.cpp`; rebuilt.
+
+**Measured (system llama-server A/B, 35B, bf16 KV, c=8192):**
+- all experts on CPU (`--cpu-moe`): **62.5 tok/s**, 4.8 GB
+- 12 layers on GPU (`-ot`): **76.2 tok/s** (+22%), 10.6 GB
+
+**Honest read:** at 62 tok/s Qwen already generates ~10× faster than Orpheus can *speak*
+(~5-7 tok/s of audio), so the throughput gain is nearly invisible; the real benefit is a
+slightly faster prefill / first sentence (time-to-first-audio). Sized N for safety, not max.
+
+**Launcher default `ATHENA_N_CPU_MOE=34`** (6 layers on GPU, ~3 GB). Full-pipeline co-residency
+peak (Orpheus backend + talk-llama n34 + turbo, 32k, SDL-dummy): **14268 MiB / 16303, ~2.0 GB
+margin, no OOM.** The margin matters: this is a **desktop**, and KDE/Wayland alone holds
+~1.2 GB VRAM that fluctuates with normal use — n32 (peak 15.2 GB, ~1.1 GB free) was too tight.
+Lower `ATHENA_N_CPU_MOE` for more speed/VRAM; `0` = all experts on CPU (safest, the old
+behavior). Above ~32 risks OOM if the desktop GPU load spikes.
+
+**Verified:** rebuild clean; exact launcher flag combo (`-l en`, turbo, `--n-cpu-moe 34`)
+loads with no unknown-language / OOM / CUDA errors; MOE_FLAG selector falls back to `--cpu-moe`
+on `0` or a non-numeric value.
+
+### 26.2 Bluetooth "no audio output" fix — force HFP profile up front (2026-07-06)
+
+First real spoken run: STT + LLM + orpheus-speak all worked (SNAC decoded, "first audio in
+175 ms"), but nothing came out of the Bose. Root cause: **BT profile conflict.** A single
+BT speaker+mic does playback (A2DP, no source) OR capture (HSP/HFP, 16 kHz mono duplex) —
+never A2DP-out + mic-in together. `setup_audio` captured the **A2DP** sink at startup; then
+talk-llama opened the mic, PipeWire auto-switched the card to HFP to provide a source, and
+that switch **tore down the A2DP sink node** the exported `PULSE_SINK` pointed at → pacat
+wrote into a dead sink → silence. (Confirmed: pacat→A2DP plays fine in isolation; the card
+sat in `a2dp-sink` after the run with `sources: 0`.)
+
+**Fix:** `setup_audio` now forces the matched Bluetooth card to `headset-head-unit`
+(mSBC, CVSD fallback) **before** capturing sink/source, so the HFP sink+source are both
+present and stable — no mid-run profile switch. Saved pre-launch profile restored on exit
+(`restore_audio`). Gated by `ATHENA_BT_FORCE_HFP` (default 1); no-op for non-bluez
+`HEADSET_PATTERN` (USB headsets match no card). **Verified:** with the card in HFP, holding
+the mic open (source RUNNING) and playing TTS (sink RUNNING) **simultaneously** both succeed
+and the profile holds — the exact scenario that produced silence.
+
+### 26.3 Bluetooth "no audio" — the REAL cause: pacat vs orpheus's aplay-style --play-raw (2026-07-06)
+
+**Correction to §26 / §26.2.** The HFP profile force (§26.2) was necessary but NOT the cause of
+silence. Root cause: **orpheus-speak's `--play-raw` interface is aplay-specific.** In
+`RawSink::start()` (orpheus-speak.cpp) it tokenizes the play command and *appends* `-r <rate> -`
+(aplay's sample-rate + read-stdin), then `posix_spawnp`s it with **stderr redirected to
+/dev/null**. §26 set `TTS_PLAY_CMD` to a `pacat` command — so the child became
+`pacat … -r 24000 -`, and in pacat **`-r` = `--record`**: it flipped to capture mode and died
+instantly, silently (stderr muted). SNAC still decoded ("first audio in 175 ms" in the logs),
+so nothing looked wrong. This is why audio was silent even after the HFP fix.
+
+**Fix:** `TTS_PLAY_CMD` is now an **aplay** command routed through the ALSA `pulse` plugin:
+`aplay -q -t raw -f S16_LE -c 1 --buffer-time=300000 -D pulse`. `-D pulse` honors the
+`PULSE_SINK` setup_audio exports (→ Bose, no hardcoded device), and orpheus's appended
+`-r <rate> -` completes a valid aplay invocation. **Verified end-to-end:** real Orpheus backend
++ orpheus-speak (`--snac-cpu`, this `--play-raw`) + mic held open in HFP, driven by a real
+`---END---` trigger — session COMPLETE and the Bose sink went **RUNNING** through synthesis
+(audible). Lesson: any `--play-raw` command must be aplay-CLI-compatible (accept a trailing
+`-r RATE -`) and reach the target sink; pacat/pw-cat do not qualify without a wrapper.
+
+### 26.4 Barge-in re-enabled for the Bose — HFP duplex + echo cancellation (2026-07-06)
+
+§26.2 disabled barge-in as "half-duplex", but forcing HFP (§26.2) already keeps the mic open
+during playback, so barge-in is feasible — the only blocker is self-echo (the Bose mic hears
+Athena → she interrupts herself). Solved with AEC:
+
+- **`setup_audio` refactor:** HFP-forcing extracted to `force_bt_hfp()` and run for BOTH aec
+  and direct modes (sets `BT_SINK`/`BT_SRC`). The `aec` branch now binds module-echo-cancel's
+  `source_master`/`sink_master` to the Bose HFP nodes, so Athena's voice is removed from the
+  mic feed (`athena_aec_src`) and TTS plays via `athena_aec_sink` → Bose.
+- **Barge-in flags restored** in the talk-llama invocation, gated by `ATHENA_BARGE` (default 1):
+  `--barge-in --barge-rms 0.0020 --barge-ratio 1.5 --barge-ms 150 --barge-blackout-ms 200`.
+- **Audio mode auto-defaults to `aec`** when barge-in is on with a bluez `HEADSET_PATTERN`
+  (barge-in without AEC self-interrupts on an open speaker); prints a NOTE if barge-in runs
+  without AEC. Explicit `ATHENA_AUDIO=direct` still honored. `ATHENA_BARGE=0` disables barge-in
+  (and reverts the default to direct).
+
+**Verified (audio path):** AEC binds to the Bose; full Orpheus→orpheus-speak(`--snac-cpu`,
+`aplay -D pulse`)→`athena_aec_sink`→Bose plays through synthesis (sink RUNNING, COMPLETE) with
+the AEC mic source held open — the barge-capable topology. **NOT yet tuned acoustically:**
+whether webrtc AEC removes enough of Athena's voice over BT (latency/16 kHz mono) to avoid
+self-interruption is a real-world tuning question — raise `--barge-rms`/`--barge-ms` if she
+cuts herself off, lower them if she's hard to interrupt. A wired headset remains the most
+reliable barge-in setup (physical isolation, no AEC needed).

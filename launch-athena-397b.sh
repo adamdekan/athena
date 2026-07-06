@@ -27,16 +27,36 @@ trap 'echo "[launch-athena] ERROR at line $LINENO: \"$BASH_COMMAND\" exited with
 ATHENA_DIR="${ATHENA_DIR:-$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)}"
 export ATHENA_DIR   # children (speak-daemon.sh, the monitor) inherit it
 
-LLAMA_SERVER="$ATHENA_DIR/llama.cpp/build/bin/llama-server"
+# llama-server is used ONLY for the Orpheus TTS backend (:8080); the conversational
+# model runs in-process inside whisper-talk-llama, not over HTTP. The system binary
+# (b9355) already runs on this GPU, so we reuse it and skip building llama.cpp in-tree.
+# Override with LLAMA_SERVER=/path/to/llama-server if you build one yourself.
+LLAMA_SERVER="${LLAMA_SERVER:-$(command -v llama-server 2>/dev/null || echo "$ATHENA_DIR/llama.cpp/build/bin/llama-server")}"
 ORPHEUS_SPEAK="$ATHENA_DIR/orpheus/build/orpheus-speak"
 TALK_LLAMA="$ATHENA_DIR/whisper.cpp/build/bin/whisper-talk-llama"
 
 ORPHEUS_MODEL="$ATHENA_DIR/models/orpheus-3b-0.1-ft-UD-Q4_K_XL.gguf"
 SNAC_MODEL="$ATHENA_DIR/orpheus/snac24_dynamic_fp16.onnx"
-QWEN_MODEL="$ATHENA_DIR/models/Qwen3.5-397B-A17B-UD-Q3_K_XL-00001-of-00005.gguf"
-QWEN_SHARDS=5   # split GGUF: shards 00001..00005 must all be present
-WHISPER_MODEL="$ATHENA_DIR/models/ggml-small.en.bin"
+# Conversational model retargeted for THIS device (16 GB VRAM / 62 GB RAM): the
+# Qwen3.6-35B-A3B MoE (Q4_K_XL, single-file GGUF), using the optimized inference
+# settings from ~/qwen_t8.sh. The 397B needed 192 GB RAM and does not fit here.
+# Attention/dense layers run on the GPU (-ngl 99); most routed experts on CPU, with a
+# few layers' experts offloaded to the GPU for speed (see ATHENA_N_CPU_MOE below).
+QWEN_MODEL="${QWEN_MODEL:-$HOME/.models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf}"
+QWEN_SHARDS=1   # single-file GGUF (not a split model)
+# STT model. Upgraded small.en -> large-v3-turbo to spend VRAM headroom on transcription
+# accuracy (the front of the pipeline; STT errors cascade into wrong replies). turbo is
+# multilingual, so language is pinned to English in the talk-llama invocation (-l en).
+WHISPER_MODEL="${WHISPER_MODEL:-$ATHENA_DIR/models/ggml-large-v3-turbo.bin}"
 VAD_MODEL="$ATHENA_DIR/models/ggml-silero-v6.2.0.bin"   # Silero streaming end-of-turn VAD (./models/download-vad-model.sh silero-v6.2.0)
+
+# MoE expert placement. Qwen3.6-35B-A3B has 40 MoE layers (~490 MiB experts each).
+# ATHENA_N_CPU_MOE = number of layers whose experts stay in system RAM; the remaining
+# (40 - N) layers' experts run on the GPU for faster prefill/decode. Default 34 → 6 layers
+# on GPU (~3 GB), measured full-pipeline peak 14.3/16.3 GB (~2 GB margin for the desktop
+# compositor, which itself uses ~1.2 GB here). Lower N = faster + more VRAM; 0 = all on CPU
+# (safest). Above ~32 the pipeline risks OOM if the desktop GPU load spikes.
+ATHENA_N_CPU_MOE="${ATHENA_N_CPU_MOE:-34}"
 SPEAK_DAEMON="$ATHENA_DIR/speak-daemon.sh"
 
 # emotion2vec speech-emotion tagging (ONNX, runs inline in talk-llama on GPU 0).
@@ -726,9 +746,67 @@ restore_system_performance() {
 #   ATHENA_AUDIO=aec     route both streams through module-echo-cancel
 #                        (webrtc). For open speakers + mic, where her voice
 #                        would pollute the VAD floor and barge detector.
-ATHENA_AUDIO="${ATHENA_AUDIO:-direct}"
-HEADSET_PATTERN="${HEADSET_PATTERN:-Logi_USB_Headset}"
+# Bose Revolve SoundLink over Bluetooth. "bluez" matches both the A2DP output
+# (bluez_output.<MAC>.*) and the HFP input (bluez_input.<MAC>) PipeWire nodes.
+# NOTE on Bluetooth duplex: a single BT speaker cannot do hi-fi A2DP output AND mic input
+# at once. talk-llama holds the mic open continuously, so setup_audio forces the Bose into
+# HFP/mSBC duplex (16 kHz mono both ways) — "phone-call" quality, not A2DP.
+HEADSET_PATTERN="${HEADSET_PATTERN:-bluez}"
+
+# Barge-in: talk over Athena to interrupt her mid-reply. Needs the mic open during playback
+# (HFP duplex gives that) AND echo cancellation, or she hears her own voice and interrupts
+# herself. So when barge-in is on with a Bluetooth speaker, default the audio path to AEC.
+ATHENA_BARGE="${ATHENA_BARGE:-1}"
+if [ -z "${ATHENA_AUDIO:-}" ]; then
+    if [ "$ATHENA_BARGE" != "0" ] && [[ "$HEADSET_PATTERN" == *bluez* ]]; then
+        ATHENA_AUDIO=aec     # echo cancel so barge-in doesn't self-trigger on the Bose
+    else
+        ATHENA_AUDIO=direct
+    fi
+fi
+#   ATHENA_AUDIO=direct  mic + playback on the bare device, no DSP. Fine for a headset
+#                        (physical isolation); on the Bose, barge-in will self-interrupt.
+#   ATHENA_AUDIO=aec     route both streams through module-echo-cancel (webrtc), bound to
+#                        the Bose HFP nodes — removes Athena's voice from the mic. Needed
+#                        for reliable barge-in on an open BT speaker + mic.
+
+# TTS playback command for orpheus-speak's streaming path (--play-raw). orpheus-speak
+# pipes raw mono S16_LE PCM to this command's stdin AND appends aplay-style "-r <rate> -"
+# (sample rate + read-from-stdin), so the command MUST be aplay-compatible. We route ALSA
+# to the Bose via the "pulse" ALSA plugin (-D pulse), which honors the PULSE_SINK that
+# setup_audio exports — no device hardcoded. NB: a pacat/pw-cat command does NOT work here,
+# because orpheus appends "-r" and pacat reads that as --record (this was the "no audio"
+# bug). The bare "aplay" default also fails: raw ALSA cannot reach the PipeWire BT sink.
+TTS_PLAY_CMD="${TTS_PLAY_CMD:-aplay -q -t raw -f S16_LE -c 1 --buffer-time=300000 -D pulse}"
 AEC_MODULE_ID=""
+BT_CARD_SAVE=""       # Bluetooth card whose profile setup_audio forced to HFP (restored on exit)
+BT_PROFILE_SAVE=""    # its pre-launch active profile (e.g. a2dp-sink)
+BT_SINK=""            # Bose HFP sink node   (set by force_bt_hfp)
+BT_SRC=""             # Bose HFP source node (set by force_bt_hfp)
+
+# force_bt_hfp: put the matched Bluetooth card into HFP so mic + playback coexist (a single
+# BT speaker can't do A2DP output + mic input at once). Sets BT_SINK/BT_SRC and saves the
+# prior profile for restore_audio. No-op for a non-bluez HEADSET_PATTERN (USB headsets).
+force_bt_hfp() {
+    [ "${ATHENA_BT_FORCE_HFP:-1}" = "0" ] && return
+    local bt_card
+    bt_card=$(pactl list short cards | awk -v p="$HEADSET_PATTERN" '$2 ~ p {print $2; exit}')
+    [ -z "$bt_card" ] && return
+    BT_PROFILE_SAVE=$(pactl list cards | awk -v c="Name: $bt_card" '
+        index($0,c){f=1} f && /Active Profile:/{print $3; exit}')
+    BT_CARD_SAVE="$bt_card"
+    if pactl set-card-profile "$bt_card" headset-head-unit 2>/dev/null; then
+        echo "  Bluetooth: $bt_card -> headset-head-unit (HFP/mSBC duplex; was ${BT_PROFILE_SAVE:-?})"
+    elif pactl set-card-profile "$bt_card" headset-head-unit-cvsd 2>/dev/null; then
+        echo "  Bluetooth: $bt_card -> headset-head-unit-cvsd (HFP/CVSD duplex; was ${BT_PROFILE_SAVE:-?})"
+    else
+        echo "  WARNING: could not set an HFP profile on $bt_card — mic + playback may not coexist"
+        BT_CARD_SAVE=""; return
+    fi
+    sleep 1   # let PipeWire tear down the A2DP node and expose the HFP sink/source
+    BT_SINK=$(pactl list short sinks   | awk -v p="$HEADSET_PATTERN" '$2 ~ p {print $2; exit}')
+    BT_SRC=$(pactl  list short sources | awk -v p="$HEADSET_PATTERN" '$2 ~ p && $2 !~ /\.monitor$/ {print $2; exit}')
+}
 
 setup_audio() {
     if ! command -v pactl &>/dev/null; then
@@ -736,14 +814,22 @@ setup_audio() {
         return
     fi
 
+    echo "[launch-athena] audio: $ATHENA_AUDIO mode"
+
+    # Force the Bose into HFP first (mic + playback must share the HSP/HFP profile — A2DP
+    # has no mic). Runs for BOTH aec and direct so BT_SINK/BT_SRC are the stable HFP nodes.
+    force_bt_hfp
+
     if [ "$ATHENA_AUDIO" = "aec" ]; then
-        echo "[launch-athena] audio: echo-cancel mode"
+        # Echo cancellation: remove Athena's own voice from the mic so barge-in does not
+        # self-interrupt on a single BT speaker+mic. Bind the canceller's master to the Bose
+        # HFP nodes (BT_SINK/BT_SRC); without a BT match it falls back to system defaults.
+        local master_args=""
+        [ -n "$BT_SRC" ] && [ -n "$BT_SINK" ] && master_args="source_master=$BT_SRC sink_master=$BT_SINK"
         AEC_MODULE_ID=$(pactl load-module module-echo-cancel aec_method=webrtc \
-            source_name=athena_aec_src sink_name=athena_aec_sink) || AEC_MODULE_ID=""
+            $master_args source_name=athena_aec_src sink_name=athena_aec_sink) || AEC_MODULE_ID=""
         if [ -n "$AEC_MODULE_ID" ]; then
-            # nodes register asynchronously — wait for them, or the targets
-            # land on nothing (the old silent failure)
-            local i
+            local i   # nodes register asynchronously — wait, or targets land on nothing
             for i in $(seq 1 40); do
                 pactl list short sources | grep -q "athena_aec_src" && break
                 sleep 0.05
@@ -751,8 +837,9 @@ setup_audio() {
             if pactl list short sources | grep -q "athena_aec_src"; then
                 export PULSE_SOURCE=athena_aec_src
                 export PULSE_SINK=athena_aec_sink
-                echo "  mic      <- athena_aec_src (webrtc echo cancel)"
-                echo "  playback -> athena_aec_sink"
+                export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulseaudio}"
+                echo "  mic      <- athena_aec_src (webrtc echo cancel${BT_SRC:+ on $BT_SRC})"
+                echo "  playback -> athena_aec_sink${BT_SINK:+ -> $BT_SINK}"
                 return
             fi
             echo "  WARNING: AEC nodes never registered — falling back to direct"
@@ -763,15 +850,21 @@ setup_audio() {
         fi
     fi
 
-    echo "[launch-athena] audio: direct mode"
-    local sink src
-    sink=$(pactl list short sinks   | awk -v p="$HEADSET_PATTERN" '$2 ~ p {print $2; exit}')
-    src=$(pactl  list short sources | awk -v p="$HEADSET_PATTERN" '$2 ~ p && $2 !~ /\.monitor$/ {print $2; exit}')
+    # Direct mode: route talk-llama's mic + TTS straight at the Bose HFP nodes. No echo
+    # cancellation, so barge-in (if enabled) can self-trigger on Athena's own voice — use
+    # ATHENA_AUDIO=aec for reliable barge-in on the Bose.
+    local sink="$BT_SINK" src="$BT_SRC"
+    [ -z "$sink" ] && sink=$(pactl list short sinks   | awk -v p="$HEADSET_PATTERN" '$2 ~ p {print $2; exit}')
+    [ -z "$src" ]  && src=$(pactl  list short sources | awk -v p="$HEADSET_PATTERN" '$2 ~ p && $2 !~ /\.monitor$/ {print $2; exit}')
     if [ -n "$sink" ] && [ -n "$src" ]; then
         export PULSE_SINK="$sink"
         export PULSE_SOURCE="$src"
+        # Force SDL (talk-llama mic capture) onto the PulseAudio backend so it honors
+        # PULSE_SOURCE. The TTS player (aplay -D pulse) honors PULSE_SINK the same way.
+        export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulseaudio}"
         echo "  playback -> $sink"
         echo "  mic      <- $src"
+        echo "  SDL_AUDIODRIVER=$SDL_AUDIODRIVER (mic honors PULSE_SOURCE)"
     else
         echo "  WARNING: no devices matching '$HEADSET_PATTERN' — using system defaults. Available:"
         pactl list short sinks   | awk '{print "    sink   " $2}'
@@ -783,6 +876,13 @@ restore_audio() {
     if [ -n "$AEC_MODULE_ID" ]; then
         pactl unload-module "$AEC_MODULE_ID" 2>/dev/null && echo "  echo cancel: unloaded"
         AEC_MODULE_ID=""
+    fi
+    # Restore the Bluetooth card to its pre-launch profile (typically a2dp-sink) so the
+    # Bose returns to hi-fi playback for other apps after ATHENA exits.
+    if [ -n "$BT_CARD_SAVE" ] && [ -n "$BT_PROFILE_SAVE" ]; then
+        pactl set-card-profile "$BT_CARD_SAVE" "$BT_PROFILE_SAVE" 2>/dev/null \
+            && echo "  Bluetooth: $BT_CARD_SAVE -> $BT_PROFILE_SAVE (restored)"
+        BT_CARD_SAVE=""
     fi
 }
 
@@ -916,10 +1016,15 @@ check_file "$ORPHEUS_SPEAK" "orpheus-speak binary"
 check_file "$TALK_LLAMA"    "whisper-talk-llama binary"
 check_file "$ORPHEUS_MODEL" "Orpheus GGUF model"
 check_file "$SNAC_MODEL"    "SNAC ONNX decoder"
-# Qwen is a split GGUF — llama.cpp opens shard 1 and pulls in the rest, so a
-# missing later shard would otherwise only fail minutes into the load.
+# Qwen model check. QWEN_SHARDS=1 → single-file GGUF (current 35B). For a split
+# GGUF (QWEN_SHARDS>1) llama.cpp opens shard 1 and pulls in the rest, so we verify
+# every shard up front — a missing later shard would otherwise only fail minutes in.
 for i in $(seq 1 "$QWEN_SHARDS"); do
-    check_file "${QWEN_MODEL/00001-of/0000${i}-of}" "Qwen3.5 GGUF shard ${i}/${QWEN_SHARDS}"
+    if [ "$QWEN_SHARDS" -eq 1 ]; then
+        check_file "$QWEN_MODEL" "Qwen GGUF model"
+    else
+        check_file "${QWEN_MODEL/00001-of/0000${i}-of}" "Qwen GGUF shard ${i}/${QWEN_SHARDS}"
+    fi
 done
 check_file "$WHISPER_MODEL" "Whisper model"
 check_file "$VAD_MODEL"     "Silero VAD model"
@@ -1220,7 +1325,8 @@ start_orpheus_speak() {
       exec "$ORPHEUS_SPEAK" \
           --watch "$TRIGGER_FILE" \
           --snac "$SNAC_MODEL" \
-          --play "aplay -q" \
+          --snac-cpu \
+          --play-raw "$TTS_PLAY_CMD" \
           --stream-tts \
           "${DIAG_FLAG[@]}" \
           "${CAPTURE_FLAG[@]}" \
@@ -1424,28 +1530,46 @@ export SDL_AUDIODRIVER=pulse
 #   --endpoint-f0-fall/-energy-decay still select short-vs-long, inert since
 #   short==long==800; extend is layered on top. Watch the [silero] "-> not-done/extend
 #   (1200 ms)" debug lines: they should fire on held mid-thought rises, NOT genuine ends.
-# NEVER core-dump the brain: its ~161 GiB mlock'd RSS would write a catastrophic core
-# even though core_pattern is set for the small clients (CHANGES.MD §12).
+# NEVER core-dump the brain: on the reference machine its mlock'd RSS would write a
+# catastrophic core (CHANGES.MD §12); harmless here (35B ~ 23 GiB) but kept for safety.
+# Device retarget (16 GB VRAM / 62 GB RAM, ~/qwen_t8.sh): --ctx-size 32768, -t 8 on the
+# P-cores (taskset 0-15). KV cache is bf16 (NOT qwen_t8's q4_0): with ~11 GB VRAM free at
+# 32k there is no need to quantize KV, and bf16 avoids the Qwen output degradation seen
+# with quantized KV. Barge-in (talk over Athena to interrupt) is set by ATHENA_BARGE below.
+# Expert placement: partial GPU offload of MoE experts (ATHENA_N_CPU_MOE, see top). N>0
+# keeps the first N layers' experts in RAM and runs the rest on the GPU; 0 = all on CPU.
+if [ "${ATHENA_N_CPU_MOE:-0}" -gt 0 ] 2>/dev/null; then
+    MOE_FLAG=(--n-cpu-moe "$ATHENA_N_CPU_MOE")
+else
+    MOE_FLAG=(--cpu-moe)
+fi
+# Barge-in (only when ATHENA_BARGE != 0). The mic stays open during playback via HFP duplex;
+# AEC (ATHENA_AUDIO=aec, defaulted on for the Bose) keeps Athena from hearing herself and
+# self-interrupting. Thresholds are the field-tuned ATHENA values — raise --barge-rms /
+# --barge-ms if she still cuts herself off, lower them if she's hard to interrupt.
+if [ "${ATHENA_BARGE:-1}" != "0" ]; then
+    BARGE_FLAG=(--barge-in --barge-rms 0.0020 --barge-ratio 1.5 --barge-ms 150 --barge-blackout-ms 200)
+    [ "$ATHENA_AUDIO" != "aec" ] && echo "[launch-athena] NOTE: barge-in ON without AEC (ATHENA_AUDIO=$ATHENA_AUDIO) — on an open speaker Athena may interrupt herself; use ATHENA_AUDIO=aec"
+else
+    BARGE_FLAG=()
+fi
 ulimit -c 0
 taskset -c 0-15 "$TALK_LLAMA" \
     -ml "$QWEN_MODEL" \
     -mw "$WHISPER_MODEL" \
-    --ctx-size 80000 \
+    -l en \
+    --ctx-size 32768 \
     --mlock \
     --no-mmap \
-    --cpu-moe \
-    -t 16 -ngl 99 \
+    "${MOE_FLAG[@]}" \
+    -t 8 -ngl 99 \
     -ctk bf16 -ctv bf16 -fa \
     --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0.00 \
     --presence-penalty 1.5 --repeat-penalty 1.0 \
     --reasoning off \
     -s "$SPEAK_DAEMON" -sf "$SPEAK_FILE" \
     --stream-file "$TRIGGER_FILE" \
-    --barge-in \
-    --barge-rms 0.0020 \
-    --barge-ratio 1.5 \
-    --barge-ms 150 \
-    --barge-blackout-ms 200 \
+    "${BARGE_FLAG[@]}" \
     "${MEMORY_ARGS[@]}" \
     -p Igor -bn Athena \
     -mt 256 -vms 25000 \

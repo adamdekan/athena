@@ -2144,19 +2144,32 @@ int main(int argc, char ** argv) {
     // MoE CPU offloading: move expert FFN tensors to system RAM
     // Uses tensor_buft_overrides to redirect expert weights to CPU buffer.
     // Same regex pattern used by llama.cpp's internal llama_params_fit().
-    static const std::string moe_pattern = "blk\\.\\d+\\.ffn_(up|down|gate)_(ch|)exps";
+    static const std::string moe_pattern_all = "blk\\.\\d+\\.ffn_(up|down|gate)_(ch|)exps";
+    std::string moe_pattern_partial;   // built for --n-cpu-moe; must outlive the model load below
     struct llama_model_tensor_buft_override moe_overrides[2] = {{nullptr, nullptr}, {nullptr, nullptr}};
 
     if (params.cpu_moe || params.n_cpu_moe > 0) {
+        const char * moe_pat = nullptr;
         if (params.n_cpu_moe > 0) {
-            fprintf(stderr, "%s: NOTE: --n-cpu-moe partial offload not yet supported via tensor overrides.\n", __func__);
-            fprintf(stderr, "%s:       Use --cpu-moe to offload ALL expert layers, or use llama-server with -ot.\n", __func__);
+            // Partial offload: keep the experts of the FIRST N layers in system RAM and
+            // leave the rest on the GPU (VRAM permitting) for faster expert matmuls. Build
+            // an anchored alternation blk.(0|1|...|N-1). — the trailing "\." stops blk.1
+            // from also matching blk.10, so exactly layers [0, N) are redirected to CPU.
+            moe_pattern_partial = "blk\\.(";
+            for (int l = 0; l < params.n_cpu_moe; ++l) {
+                if (l) moe_pattern_partial += "|";
+                moe_pattern_partial += std::to_string(l);
+            }
+            moe_pattern_partial += ")\\.ffn_(up|down|gate)_(ch|)exps";
+            moe_pat = moe_pattern_partial.c_str();
+            fprintf(stderr, "%s: MoE partial CPU offload — experts of the first %d layer(s) to system RAM, the rest on GPU\n", __func__, params.n_cpu_moe);
         } else {
-            moe_overrides[0] = {moe_pattern.c_str(), ggml_backend_cpu_buffer_type()};
-            moe_overrides[1] = {nullptr, nullptr};
-            lmparams.tensor_buft_overrides = moe_overrides;
+            moe_pat = moe_pattern_all.c_str();
             fprintf(stderr, "%s: MoE CPU offload enabled — all expert FFN tensors directed to system RAM\n", __func__);
         }
+        moe_overrides[0] = {moe_pat, ggml_backend_cpu_buffer_type()};
+        moe_overrides[1] = {nullptr, nullptr};
+        lmparams.tensor_buft_overrides = moe_overrides;
     }
 
     struct llama_model * model_llama = llama_model_load_from_file(params.model_llama.c_str(), lmparams);
