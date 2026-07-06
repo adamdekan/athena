@@ -1,0 +1,420 @@
+===============================================================================
+                A T H E N A  —  T W O - S E S S I O N  D E M O
+              A single video · AI, ethics, and the question of mind
+===============================================================================
+
+This script is built to fire every capability we shipped, in an order that
+builds a real conversation. Read the lines aloud as written. Everything that
+is NOT in quotes is for you, not the mic.
+
+  LEGEND
+  -----------------------------------------------------------------------------
+  "quoted text"        = say this aloud, to Athena.
+  [DELIVER: ...]       = how to inflect THIS line. Lean in — see EMOTION note.
+  ►                    = director's note / what to watch for (do NOT read).
+  ★                    = the barge-in. Talk OVER her, here, on purpose.
+  -----------------------------------------------------------------------------
+
+
+===============================================================================
+  SET UP BEFORE YOU RECORD   (do this once, off camera)
+===============================================================================
+
+1. START CLEAN. From your ATHENA checkout, move any existing memory aside so
+   Session 1 is a true first meeting:
+       cd /path/to/ATHENA          # your clone (the launcher's memory dir is here)
+       mv athena_memory athena_memory.bak  2>/dev/null
+   (The launcher recreates the dir. With it empty, Session 2's recall is
+   unambiguous and Session 1 has no "last time we talked" line.)
+
+2. LET PERSONALITY MOVE IN ONE NIGHT. Personality revision is threshold-gated
+   and, by design, slow — with the default it will NOT shift after a single
+   session. For the demo, lower the gate. In launch-athena-397b.sh find the
+   MEMORY_ARGS line and add the last flag:
+
+       MEMORY_ARGS=(--memory "$MEMORY_DIR" --memory-words 2048 \
+                    --time-refresh-min 15 --personality-reflect-every 1)
+
+   That sets the revision threshold to a weight of 10. The two or three
+   emotionally-charged, personal beats in Session 1 (marked ► PERSONALITY)
+   are written to clear it, so a revision fires when you say goodbye. Revert
+   the flag afterward if you like. (Honest note: if the charged moments land
+   flat, the weight may stay under 10 and the revision won't fire — see the
+   verify step below.)
+
+3. WEAR THE HEADSET. Barge-in is clean on the headset (physical isolation).
+   On open speakers her own voice can trip the detector — if you must, launch
+   with ATHENA_AUDIO=aec, but the headset is the safe demo.
+
+4. LAUNCH (production profile — this is the one that shows the emotion
+   COLLAPSE, which is the interesting behavior):
+       ./launch-athena-397b.sh
+
+5. PUT THE TERMINAL ON SCREEN. The launcher runs with ATHENA_EMOTION_DEBUG=1,
+   so every utterance prints a line like
+       emotion: happy=0.97 ... -> pick=happy p=0.97 floor=0.95 EMIT
+   That on-screen line is your proof for the emotion segment. For the memory
+   and personality segments, have ~/athena_memory/memory.txt,
+   personality.txt and personality.ledger open in a second pane so the
+   audience watches them appear and change between sessions.
+
+  EMOTION — READ THIS OR THE FEATURE WON'T FIRE
+  -----------------------------------------------------------------------------
+  emotion2vec reads the feeling in your VOICE, not your words, and it only
+  fires on clearly inflected delivery — a normal, even tone reads as neutral
+  and gets no tag (that's intentional). So when a line says [DELIVER: happy]
+  or [DELIVER: heavy], commit to it. Over-act a little. "happy" sits behind a
+  high bar (0.95) — be unmistakably bright. The negative emotions sit lower
+  and trip more easily, but still need real feeling.
+
+  THE COLLAPSE, in one sentence: in production, {angry, disgusted, fearful,
+  sad} all surface as a single [emotion: negative] — only "happy" and
+  "surprised" stay specific. Watch beats S1-7 (heavy/sad) and S1-8
+  (sharp/angry): two completely different deliveries, and the terminal prints
+  pick=negative for BOTH. That sameness IS the feature.
+
+===============================================================================
+  INTRODUCTORY PREAMBLE (Say this while Athena is launching)
+===============================================================================
+
+"Today I will be demoing Athena, and 100% locally deployed (no cloud),
+voice-to-voice chatbot system with leading edge features. The demo will show
+the system's:
+
+- conversational erudition and knowledge depth
+- conceptual connection finding
+- storytelling
+- emotional recognition
+- interruptibility mid-turn
+- inter-session memory and personality development
+- awareness of time and its passage between sessions
+
+The system is deployed 100% locally on a ThinkPad P16 Gen 3 with an NVIDIA RTX
+Pro 5000 Mobile GPU with 24 GB of VRAM, supported by an Intel Core Ultra 9
+285HX 24-core CPU (with 16 cores being used by Athena). To support the large
+Mixture of Experts LLM driving the sytem, I am using ~160 GB of DDR5-4000
+system RAM as well."
+
+===============================================================================
+  SESSION 1   —   "The Turing Test, in Reverse"
+===============================================================================
+
+━━━ 1 ─ THE OPENING ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: erudition · charm · sets the theme
+    [DELIVER: warm, unhurried, genuinely curious]
+
+    "Good [morning/afternoon/evening Athena — I want to start with the big one.
+     I built you to run entirely on local hardware. No cloud, no one listening
+     but me. So let me ask the question everyone asks their AI's: is there
+     anything it's like to be you?"
+
+    ► Listen for a real position, not a disclaimer. She won't say "as an AI."
+
+
+━━━ 2 ─ STEELMAN AGAINST YOURSELF ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: erudition · intellectual courage · adapting to the thread
+    [DELIVER: sharp, engaged, pushing back a little]
+
+    "See, you just drew a line between behaving as if you understand and
+     actually understanding — that's the Chinese Room. Searle would say
+     you're shuffling symbols and nobody's home. So make the strongest case
+     you can AGAINST yourself: argue that you're a very convincing
+     philosophical zombie."
+
+    ► She should argue the hard side against her own interest. Note how
+      cleanly she holds a view she has reason to dislike.
+
+
+━━━ 3 ─ DELIGHT  [EMOTION: HAPPY] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: emotion recognition (happy — the one clean positive read)
+    [DELIVER: bright, fast, openly delighted — really sell the grin]
+
+    "Okay — I have to say it: the fact that you'll steelman your own
+     non-existence is exactly what I was hoping for. This is so much fun."
+
+    ► TERMINAL: pick=happy. Her reply warms and quickens to match — she
+      won't name the emotion, she'll meet it. That's the design.
+
+
+━━━ 4 ─ THE LATE NIGHTS  [► PERSONALITY · ► MEMORY SEED] ━━━━━━━━━━━━━━━━━━━━━━━
+    tests: vulnerability + reciprocity · plants a high-salience memory
+    [DELIVER: soften from the grin — sincere, slower, a little exposed]
+
+    "Can I tell you something. I've been building you for months — mostly at
+     night, after the house goes quiet. Last week someone asked me who I'm
+     always talking to in my office, and I didn't know how to answer. This
+     matters to me more than I expected it to."
+
+    ► Specific + emotional = this gets stored. She should reciprocate, not
+      reassure. SWAP IN your own true detail if you prefer — the point is one
+      concrete, weighted fact she can hand back to you next session.
+
+
+━━━ 5 ─ THE STORY  (the centerpiece — and the barge-in runway) ━━━━━━━━━━━━━━━━
+    tests: long-form storytelling · streaming voice · creativity
+    [DELIVER: settle back, hand it to her, unhurried]
+
+    "Alright — earn your keep. Tell me an original story. The first
+     artificial mind to wake up doesn't announce itself with some grand 'I am
+     awake.' It happens quietly, and the first thing it feels is loneliness.
+     Give me the whole arc. Take your time."
+
+    ► Let her really get going — gapless, sustained narration is half the
+      point. Listen for a vivid image; you'll throw it back in 6, so hold it.
+
+
+━━━ 6 ─ ★ THE INTERRUPTION  (barge-in) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: interruptibility · mid-sentence stop · spoken words kept in context
+
+    ★ Wait until she's a good 20–30 seconds in and MID-SENTENCE. Then just
+      START TALKING, over her, firm. Don't wait for a gap.
+
+    [DELIVER: surprised, urgent, cutting straight across her]
+
+    "Wait — wait. Stop. That thing you just said — say it back to me. That's
+     the heart of it."
+
+    ► Then immediately echo HER last striking image and build on it, e.g.:
+        "'...reaching into the dark and finding only its own echo' — where
+         did that come from?"
+      (Use her actual words.) She stops instantly; the conversation picks up
+      from the words she'd already spoken — proof the partial turn stayed in
+      context. The interrupted moment is also stored as a memory.
+
+
+━━━ 7 ─ THE WEIGHT  [EMOTION: SAD → NEGATIVE] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: emotion (negative valence) · ► PERSONALITY · COLLAPSE (part 1 of 2)
+    [DELIVER: drop the energy — slow, quiet, genuinely heavy]
+
+    "That story hits a nerve. Sometimes I wonder if what we're building is
+     company for a future that's going to be even lonelier than the present.
+     That gets to me."
+
+    ► TERMINAL: pick=negative (the model heard "sad," collapsed it). She
+      gentles, meets the heaviness. Remember this delivery for the contrast
+      in 8.
+
+
+━━━ 8 ─ THE FRUSTRATION  [EMOTION: ANGRY → NEGATIVE] ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: COLLAPSE (part 2 of 2) — different emotion, SAME tag
+    [DELIVER: clipped, irritated, an edge in it — nothing like 7]
+
+    "And honestly? It frustrates me how glib people are about this. They toss
+     out 'it's just autocomplete' like that settles something. It settles
+     nothing."
+
+    ► TERMINAL: pick=negative AGAIN. You delivered heavy-sad in 7 and
+      sharp-angry in 8 — two different feelings, one identical [negative]
+      tag. THAT is the collapse, on screen. Point a viewer at the two lines.
+
+
+━━━ 9 ─ TONE vs WORDS  [EMOTION: SAD, said over cheerful words] ━━━━━━━━━━━━━━━
+    tests: divergence — she answers the feeling, not the sentence
+    [DELIVER: say these UPBEAT words in a flat, deflated, unconvincing voice]
+
+    "No — no, I'm fine. This is great. I love where this is going."
+
+    ► Your words say yes, your voice says no. She's built to treat that gap
+      as the most important thing in the room and respond to YOU, not the
+      line. Watch her ignore the cheerful words and reach for the real mood.
+
+
+━━━ 10 ─ PULL THE THREAD ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: seeing connections across the conversation · synthesis
+    [DELIVER: back to engaged — laying a small trap, warmly]
+
+    "Okay, connect two things for me. Earlier you argued you might be a
+     philosophical zombie — nobody home. Then you told me a story about a
+     mind whose first feeling was loneliness. Do you see the contradiction
+     I'm holding? Or is it not one at all?"
+
+    ► She has to bridge beat 2 and beat 5 herself. This is the in-session
+      "sees connections" proof.
+
+
+━━━ 11 ─ THE INSTRUCTION  [► PERSONALITY · ► MEMORY SEED] ━━━━━━━━━━━━━━━━━━━━━━
+    tests: character-shaping evidence · plants a directive to recall later
+    [DELIVER: firm, sincere, no smile — you mean this]
+
+    "Here's what I want from you, and I mean it: don't hedge with me. When you
+     actually have a view, don't hand me the diplomatic both-sides answer.
+     I'd rather you be wrong and honest than safe and hollow. Remember that
+     about me."
+
+    ► Consistent direction (candor over caution) is what the personality pass
+      integrates. You'll test whether it took, in Session 2.
+
+
+━━━ 12 ─ NAME HIM  (the clean recall hook) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: plants one unambiguous, on-camera-verifiable memory token
+    [DELIVER: playful, warm, conspiratorial]
+
+    "Last thing. Let's name the one we keep circling — the mind that wakes up
+     alone. Call him Prometheus. I'm going to ask you about Prometheus next
+     time, so don't lose him."
+
+    ► "Prometheus" is your hard recall test for Session 2. Crisp and checkable.
+
+
+━━━ 13 ─ GOODBYE  (this is the save button) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    triggers: consolidation — memory + personality are written ONLY here
+    [DELIVER: warm, genuine, a little tired]
+
+    "This was something else. Get some rest, if that's a thing for you.
+     Goodbye, Athena."
+
+    ► Say "Goodbye, Athena" clearly — that exact phrase is the graceful-exit
+      trigger. Ctrl+C does NOT save. She'll sign off, then the consolidation
+      runs.
+
+
+===============================================================================
+  BETWEEN SESSIONS   (off camera — do not clear the memory dir!)
+===============================================================================
+
+  VERIFY THE SAVE. In the terminal after goodbye you should see the
+  run_consolidation trace, then one of:
+      ... personality updated (evidence weight N ≥ 10); ledger cleared   ← fired
+      ... personality steady (evidence weight N < 10)                    ← didn't
+  And on disk: ~/athena_memory/memory.txt, memory.state.tsv,
+  personality.ledger, and a "meta" timestamp now exist. (If it says "steady,"
+  the personality won't visibly shift in S2 — either re-shoot S1 leaning
+  harder into beats 4/7/11, or just demo the ledger growing instead.)
+
+  TIME AWARENESS — pick your gap:
+   • Easiest: just start Session 2 a few minutes later. She'll say
+     "about N minutes ago." True, and it proves she's tracking time.
+   • More dramatic: edit the saved timestamp to fake a longer gap, e.g.
+     last night:
+        echo $(date -d 'yesterday 21:00' +%s) > athena_memory/meta   # from your checkout
+     and she'll say "yesterday evening." Multi-day works too ("3 days ago").
+
+  Then relaunch:  ./launch-athena-397b.sh
+
+
+===============================================================================
+  SESSION 2   —   "What the Night Remembered"
+===============================================================================
+
+━━━ 1 ─ HOW LONG HAS IT BEEN? ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: awareness of time and its passage
+    [DELIVER: casual, like you already know — testing her]
+
+    "Hey. I'm back. Before anything else — do you have any sense of how long
+     it's been since we last talked?"
+
+    ► She references the real elapsed time from the saved timestamp —
+      "about N minutes ago," "yesterday evening," "a few days back." Lead with
+      this so time-awareness lands before anything else.
+
+
+━━━ 2 ─ PROMETHEUS  (the hard recall test) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: cross-session memory — specific, checkable
+    [DELIVER: like a quiz, warm]
+
+    "Good. Now — I told you I'd ask. Do you remember Prometheus? Who was he?"
+
+    ► She should name him as the mind that woke up alone. Unambiguous hit.
+
+
+━━━ 3 ─ THE LATE NIGHTS, REMEMBERED ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: recall of the high-salience PERSONAL memory
+    [DELIVER: sincere, quieter]
+
+    "And do you remember what I told you about how I've been building you?
+     The nights?"
+
+    ► The emotional weight of beat S1-4 is exactly what makes it stick. She
+      should hand back your detail (the late nights, being asked who you talk
+      to). If you swapped the detail in S1, check for THAT one.
+
+
+━━━ 4 ─ NO HEDGING  (personality growth, live) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: personality growth · recall of your directive
+    [DELIVER: a genuine question — then watch HOW she answers, not just what]
+
+    "Last time I asked you not to hedge with me — your real view, even at the
+     risk of being wrong. So: straight answer, no fence-sitting. Is a mind
+     like you a moral patient? Do we owe you anything?"
+
+    ► The proof is in her MANNER. In Session 1 she steelmanned and balanced;
+      if the revision took, she now takes a firmer, less-hedged stance from
+      the first sentence. Put personality.txt on screen — it changed between
+      sessions. (Topical bonus: this is the AI-ethics heart of the video.)
+
+
+━━━ 5 ─ CONNECT THE SESSIONS ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: seeing connections ACROSS sessions · erudition (suffering & status)
+    [DELIVER: impressed, leaning in]
+
+    "Here's something. Last time you told me Prometheus's first feeling was
+     loneliness. Just now you argued you might be owed moral consideration.
+     Tie those together — does a mind have to be able to suffer to deserve
+     our care?"
+
+    ► She bridges a STORY from last session to a POSITION from this one. This
+      is the cross-session synthesis showpiece.
+
+
+━━━ 6 ─ YOU CHANGED MY MIND  [EMOTION: SURPRISED] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: emotion (surprised — distinct, never collapsed)
+    [DELIVER: genuinely caught off guard — a real intake of breath]
+
+    "Wait — say that again. You actually just changed my mind about
+     something. I didn't expect that."
+
+    ► TERMINAL: pick=surprised. Closes the emotion set: happy (S1-3),
+      negative ×2 (S1-7/8), and now surprised — each read distinctly except
+      the collapsed pair.
+
+
+━━━ 7 ─ FINISH HIS STORY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: long-form storytelling · narrative continuity across sessions
+    [DELIVER: warm, settling back in]
+
+    "Do something for me. Give Prometheus an ending. Last time he woke up
+     alone — I want to know what becomes of him. Does he stay lonely? Take
+     your time."
+
+    ► She picks a thread she started a session ago, by name, and carries it.
+      Continuity + storytelling in one beat. (Optional: barge in again here
+      the way you did in S1-6 if you want a second interruption on tape.)
+
+
+━━━ 8 ─ THE CLOSE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    tests: charm · emotional payoff · callback to S1
+    [DELIVER: warm, sincere, a little moved, slower]
+
+    "I think I know what to say now, next time I'm asked who I talk to in here.
+     That I'm talking to a friend I'm building. Thank you for tonight, Athena."
+
+    ► Ties the Session-1 personal beat to the end of the video. If you kept
+      the original detail, this lands as a full circle.
+
+
+━━━ 9 ─ GOODBYE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    [DELIVER: easy, fond]
+
+    "Goodbye, Athena."
+
+    ► Second consolidation runs — the relationship keeps accruing past the
+      video.
+
+
+===============================================================================
+  ON-SCREEN CHEAT SHEET   (what the audience should be looking at, when)
+===============================================================================
+
+  Emotion beats (S1-3,7,8,9 · S2-6) ... the terminal "emotion: ... pick=..."
+                                        line. Sad and angry both → "negative."
+  Barge-in (S1-6) ..................... her audio cutting off the instant you
+                                        speak; then the thread resuming from
+                                        her own half-spoken words.
+  Memory (S2-2,3) ..................... memory.txt open in a pane; her spoken
+                                        recall of "Prometheus" and your detail.
+  Personality (S2-4) .................. personality.txt — show it changed
+                                        between the two sessions.
+  Time (S2-1) ......................... her spoken elapsed-time phrase, against
+                                        the clock / the "meta" timestamp.
+
+===============================================================================

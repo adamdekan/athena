@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Athena (Qwen3.5-397B)
+Comment=Custom-written voice-to-voice chatbot
+Exec=bash -c "GGML_CUDA_NO_PINNED=1 ATHENA_MPS=1 '@ATHENA_DIR@/launch-athena-397b.sh' 2>&1 | ts '[%%Y-%%m-%%d %%H:%%M:%%.S]' | tee '@ATHENA_DIR@/athena.log'"
+Icon=@ATHENA_DIR@/athena-icon.jpg
+Path=@ATHENA_DIR@
+Terminal=true
+StartupNotify=true
