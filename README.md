@@ -7,6 +7,16 @@ Athena speaks with natural emotion (laughs, sighs, gasps), **reads the emotion i
 The TTS path is built around **SSE token streaming with incremental SNAC decoding**: audio for each chunk begins ~200–400 ms after the chunk is submitted, playback is gapless through a persistent raw-PCM sink with an anti-underrun write clock, and end-of-speech detection is parameterized. The stack is also **self-healing**: a health watchdog auto-restarts the TTS backend on a crash, kernel/GPU faults are captured durably for diagnosis, and the launcher hardens the NVIDIA driver configuration at install time (see [Stability, diagnostics & crash capture](#stability-diagnostics--crash-capture)).
 
 
+## Demo
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=8HuRUpJ4_as&t=237s">
+    <img src="https://img.youtube.com/vi/8HuRUpJ4_as/maxresdefault.jpg" alt="ATHENA — live demo video" width="720">
+  </a>
+</p>
+<p align="center"><em>▶ Watch the demo on YouTube</em> — a live voice-to-voice session (offline, single GPU).</p>
+
+
 ## Quick start
 
 Models are **not** bundled — the repo ships source, scripts, and the ATHENA patches; `install.sh` fetches everything else. Assuming the GPU stack is already installed (NVIDIA **595.x** driver, CUDA **12.9**, cuDNN **9.x** — see [Install the NVIDIA driver + CUDA 12.9](#install-the-nvidia-driver--cuda-129-ubuntu-2404)):
